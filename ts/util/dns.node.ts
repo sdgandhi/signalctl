@@ -7,9 +7,7 @@ import type {
   LookupAddress,
   lookup as nodeLookup,
 } from 'node:dns';
-// oxlint-disable-next-line signal-desktop/enforce-file-suffix
-import * as electron from 'electron';
-import type { ResolvedHost, ResolvedEndpoint } from 'electron';
+import { promises as dnsPromises } from 'node:dns';
 import pTimeout from 'p-timeout';
 
 import { strictAssert } from './assert.std.ts';
@@ -18,6 +16,13 @@ import type { DNSFallbackType } from '../types/DNSFallback.std.ts';
 import { SECOND } from './durations/index.std.ts';
 
 const LOOKUP_TIMEOUT_MS = 5 * SECOND;
+type ResolvedEndpoint = Readonly<{
+  address: string;
+  family: 'ipv4' | 'ipv6' | 'unspec';
+}>;
+type ResolvedHost = Readonly<{
+  endpoints: ReadonlyArray<ResolvedEndpoint>;
+}>;
 const fallbackAddrs = new Map<string, ReadonlyArray<ResolvedEndpoint>>();
 
 export function setFallback(dnsFallback: DNSFallbackType): void {
@@ -57,27 +62,18 @@ function lookupAll(
     }
 
     try {
-      if (electron.net) {
-        // Main process
-        result = await pTimeout(
-          electron.net.resolveHost(hostname, {
-            queryType,
-          }),
-          {
-            milliseconds: LOOKUP_TIMEOUT_MS,
-            message: 'lookupAll: Electron lookup timed out',
-          }
-        );
-      } else {
-        // Renderer
-        result = await pTimeout(
-          electron.ipcRenderer.invoke('net.resolveHost', hostname, queryType),
-          {
-            milliseconds: LOOKUP_TIMEOUT_MS,
-            message: 'lookupAll: Electron lookup timed out',
-          }
-        );
-      }
+      result = await pTimeout(
+        process.env.SIGNALCTL_HEADLESS === '1'
+          ? resolveWithNode(
+              hostname,
+              typeof opts.family === 'number' ? opts.family : undefined
+            )
+          : resolveWithElectron(hostname, queryType),
+        {
+          milliseconds: LOOKUP_TIMEOUT_MS,
+          message: 'lookupAll: lookup timed out',
+        }
+      );
     } catch (error) {
       const fallback = fallbackAddrs.get(hostname);
       if (fallback) {
@@ -122,6 +118,40 @@ function lookupAll(
   }
 
   drop(run());
+}
+
+async function resolveWithNode(
+  hostname: string,
+  family: number | undefined
+): Promise<Pick<ResolvedHost, 'endpoints'>> {
+  const records = await dnsPromises.lookup(hostname, {
+    all: true,
+    family: family === 4 || family === 6 ? family : 0,
+  });
+
+  return {
+    endpoints: records.map(record => ({
+      address: record.address,
+      family: record.family === 6 ? 'ipv6' : 'ipv4',
+    })),
+  };
+}
+
+async function resolveWithElectron(
+  hostname: string,
+  queryType: 'A' | 'AAAA' | undefined
+): Promise<Pick<ResolvedHost, 'endpoints'>> {
+  const electron = await import('electron');
+
+  if (electron.net) {
+    // Main process
+    return electron.net.resolveHost(hostname, {
+      queryType,
+    });
+  }
+
+  // Renderer
+  return electron.ipcRenderer.invoke('net.resolveHost', hostname, queryType);
 }
 
 export function interleaveAddresses(

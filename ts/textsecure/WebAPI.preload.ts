@@ -116,7 +116,7 @@ import type {
 } from '../types/Donations.std.ts';
 import { badgeFromServerSchema } from '../badges/parseBadgesFromServer.std.ts';
 import { ZERO_DECIMAL_CURRENCIES } from '../util/currency.dom.ts';
-import type { JobCancelReason } from '../jobs/types.std.ts';
+import { JobCancelReason } from '../jobs/types.std.ts';
 import {
   RemoteMegaphoneCtaDataSchema,
   type RemoteMegaphoneId,
@@ -2025,6 +2025,14 @@ export async function logout(): Promise<void> {
   password = '';
 
   await socketManager.logout();
+}
+
+export async function shutdown(): Promise<void> {
+  username = '';
+  password = '';
+
+  cancelInflightRequests(JobCancelReason.Shutdown);
+  await socketManager.shutdown();
 }
 
 export function getSocketStatus(): SocketStatuses {

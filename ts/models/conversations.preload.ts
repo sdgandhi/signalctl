@@ -4199,6 +4199,7 @@ export class ConversationModel {
       storyId,
       timestamp,
       extraReduxActions,
+      onSendJob,
     }: {
       dontClearDraft?: boolean;
       isForwarding?: boolean;
@@ -4206,6 +4207,7 @@ export class ConversationModel {
       storyId?: string;
       timestamp?: number;
       extraReduxActions?: () => void;
+      onSendJob?: (job: { id: string; completion: Promise<void> }) => void;
     } = {}
   ): Promise<MessageAttributesType | undefined> {
     if (this.isGroupV1AndDisabled()) {
@@ -4352,7 +4354,7 @@ export class ConversationModel {
       reason: 'mandatoryProfileSharing',
     });
 
-    await conversationJobQueue.add(
+    const sendJob = await conversationJobQueue.add(
       {
         type: conversationQueueJobEnum.enum.NormalMessage,
         conversationId: this.id,
@@ -4369,6 +4371,7 @@ export class ConversationModel {
         });
       }
     );
+    onSendJob?.(sendJob);
 
     const dbDuration = Date.now() - dbStart;
     if (dbDuration > SEND_REPORTING_THRESHOLD_MS) {

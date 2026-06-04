@@ -22,8 +22,9 @@ export class UnsupportedBackupVersion extends BackupInstallerError {
 }
 
 export class BackupDownloadFailedError extends BackupInstallerError {
-  constructor() {
+  constructor(cause?: Error) {
     super('BackupDownloadFailedError', InstallScreenBackupError.Retriable);
+    this.cause = cause;
   }
 }
 

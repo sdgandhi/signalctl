@@ -82,6 +82,7 @@ import {
 
 import { SignalService } from '../protobuf/index.std.ts';
 import { SeenStatus } from '../MessageSeenStatus.std.ts';
+import type { LoggerType } from '../types/Logging.std.ts';
 import {
   attachmentBackupJobSchema,
   type AttachmentBackupJobType,
@@ -977,6 +978,10 @@ function openAndSetUpSQLCipher(filePath: string, { key }: { key: string }) {
 let logger = sqlLogger;
 let databaseFilePath: string | undefined;
 let indexedDBPath: string | undefined;
+
+export function setServerLogger(nextLogger: LoggerType): void {
+  logger = nextLogger;
+}
 
 setSqliteLogger((code, message) => {
   if (code === 'SQLITE_SCHEMA') {

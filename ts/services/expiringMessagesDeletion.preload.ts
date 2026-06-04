@@ -16,21 +16,51 @@ const { debounce } = lodash;
 
 const log = createLogger('expiringMessagesDeletion');
 
+function unrefHeadlessTimeout(timeout: ReturnType<typeof setTimeout>): void {
+  if (process.env.SIGNALCTL_HEADLESS !== '1') {
+    return;
+  }
+
+  timeout.unref?.();
+}
+
 class ExpiringMessagesDeletionService {
   #timeout?: ReturnType<typeof setTimeout>;
+  #isShutdown = false;
   readonly #debouncedCheckExpiringMessages = debounce(
     this.#checkExpiringMessages,
     1000
   );
 
   update() {
+    if (this.#isShutdown) {
+      log.info('update: ignoring after shutdown');
+      return;
+    }
+
     drop(this.#debouncedCheckExpiringMessages());
   }
 
+  shutdown(): void {
+    this.#isShutdown = true;
+    this.#debouncedCheckExpiringMessages.cancel();
+    clearTimeoutIfNecessary(this.#timeout);
+    this.#timeout = undefined;
+  }
+
   async #destroyExpiredMessages() {
+    if (this.#isShutdown) {
+      log.info('destroyExpiredMessages: ignoring after shutdown');
+      return;
+    }
+
     try {
       log.info('destroyExpiredMessages: Loading messages...');
       const messages = await DataReader.getExpiredMessages();
+      if (this.#isShutdown) {
+        log.info('destroyExpiredMessages: stopping after shutdown');
+        return;
+      }
       log.info(
         `destroyExpiredMessages: found ${messages.length} messages to expire`
       );
@@ -71,9 +101,18 @@ class ExpiringMessagesDeletionService {
   }
 
   async #checkExpiringMessages() {
+    if (this.#isShutdown) {
+      log.info('checkExpiringMessages: ignoring after shutdown');
+      return;
+    }
+
     log.info('checkExpiringMessages: checking for expiring messages');
 
     const soonestExpiry = await DataReader.getSoonestMessageExpiry();
+    if (this.#isShutdown) {
+      log.info('checkExpiringMessages: stopping after shutdown');
+      return;
+    }
     if (!soonestExpiry) {
       log.info('checkExpiringMessages: found no messages to expire');
       return;
@@ -99,6 +138,7 @@ class ExpiringMessagesDeletionService {
 
     clearTimeoutIfNecessary(this.#timeout);
     this.#timeout = setTimeout(this.#destroyExpiredMessages.bind(this), wait);
+    unrefHeadlessTimeout(this.#timeout);
   }
 }
 
@@ -112,9 +152,19 @@ export function initialize(): void {
 
 export function update(): void {
   if (!instance) {
+    if (process.env.SIGNALCTL_HEADLESS === '1') {
+      log.info('update: ignoring missing instance in signalctl headless mode');
+      return;
+    }
+
     throw new Error('Expiring Messages Deletion service not yet initialized!');
   }
   instance.update();
 }
 
-let instance: ExpiringMessagesDeletionService;
+export function shutdown(): void {
+  instance?.shutdown();
+  instance = undefined;
+}
+
+let instance: ExpiringMessagesDeletionService | undefined;

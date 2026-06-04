@@ -253,10 +253,11 @@ export abstract class JobManager<CoreJobType> {
         return;
       }
 
-      const nextJobs = await this.params.getNextJobs({
-        limit: numJobsToStart,
-        timestamp: Date.now(),
-      });
+      const nextJobs =
+        (await this.params.getNextJobs({
+          limit: numJobsToStart,
+          timestamp: Date.now(),
+        })) ?? [];
 
       if (nextJobs.length === 0 && this.#activeJobs.size === 0) {
         if (this.#idleCallbacks.length > 0) {

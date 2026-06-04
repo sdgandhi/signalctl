@@ -18,6 +18,14 @@ const { debounce } = lodash;
 
 const log = createLogger('tapToViewMessagesDeletionService');
 
+function unrefHeadlessTimeout(timeout: ReturnType<typeof setTimeout>): void {
+  if (process.env.SIGNALCTL_HEADLESS !== '1') {
+    return;
+  }
+
+  timeout.unref?.();
+}
+
 async function eraseTapToViewMessages() {
   try {
     log.info('eraseTapToViewMessages: Loading messages...');
@@ -59,7 +67,19 @@ class TapToViewMessagesDeletionService {
   readonly #debouncedUpdate = debounce(this.#checkTapToViewMessages);
 
   update() {
+    if (this.#isPaused) {
+      log.info('update: ignoring while paused');
+      return;
+    }
+
     drop(this.#debouncedUpdate());
+  }
+
+  shutdown(): void {
+    this.#isPaused = true;
+    this.#debouncedUpdate.cancel();
+    clearTimeoutIfNecessary(this.#timeout);
+    this.#timeout = undefined;
   }
 
   pause(): void {
@@ -129,6 +149,7 @@ class TapToViewMessagesDeletionService {
       await eraseTapToViewMessages();
       this.update();
     }, wait);
+    unrefHeadlessTimeout(this.#timeout);
   }
 
   #shouldRun(): boolean {

@@ -12,12 +12,16 @@
     "name": "Signal Messenger, LLC",
     "email": "support@signal.org"
   },
+  "bin": {
+    "signalctl": "bundles/cli.js"
+  },
   "browserslist": "last 1 chrome versions",
   "main": "bundles/main.js",
   "scripts": {
     "postinstall": "pnpm run build:acknowledgments && pnpm run electron:install-app-deps",
     "postuninstall": "pnpm run build:acknowledgments",
     "start": "electron .",
+    "signalctl": "node bundles/cli.js",
     "generate": "run-s generate:phase-0 generate:phase-1",
     "generate:phase-0": "run-s build:protobuf build:emoji-data build:rolldown:prod",
     "generate:phase-1": "run-p --aggregate-output --print-label build:icu-types build:compact-locales build:styles:prod get-expire-time build:policy-files build:db-schema",

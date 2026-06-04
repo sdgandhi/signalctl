@@ -165,6 +165,19 @@ export default defineConfig([
   },
   {
     ...defaults,
+    external: external.filter(item => item !== 'electron'),
+
+    input: {
+      cli: 'ts/cli/main.node.ts',
+    },
+    resolve: {
+      alias: {
+        electron: join(__dirname, 'ts/cli/electronStub.node.ts'),
+      },
+    },
+  },
+  {
+    ...defaults,
 
     input: {
       // Main

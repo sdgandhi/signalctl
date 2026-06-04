@@ -566,6 +566,34 @@ export class SocketManager extends EventListener {
     this.#credentials = undefined;
   }
 
+  public async shutdown(): Promise<void> {
+    const authenticated = this.#authenticated;
+    const unauthenticated = this.#unauthenticated;
+
+    log.info('shutdown');
+
+    this.#reconnectController?.abort();
+    this.#reconnectController = undefined;
+
+    if (this.#unauthenticatedExpirationTimer) {
+      clearTimeout(this.#unauthenticatedExpirationTimer);
+      this.#unauthenticatedExpirationTimer = undefined;
+    }
+
+    if (authenticated) {
+      authenticated.abort();
+      this.#dropAuthenticated(authenticated);
+    }
+
+    if (unauthenticated) {
+      unauthenticated.abort();
+      this.#dropUnauthenticated(unauthenticated);
+    }
+
+    this.#credentials = undefined;
+    this.#markOffline();
+  }
+
   public get isOnline(): boolean | undefined {
     return this.#privIsOnline;
   }

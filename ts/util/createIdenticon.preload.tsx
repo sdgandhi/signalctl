@@ -65,6 +65,18 @@ export function createIdenticon(
     throw missingCaseError(details);
   }
 
+  if (process.env.SIGNALCTL_HEADLESS === '1') {
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(html)}`;
+
+    if (!saveToDisk) {
+      return Promise.resolve({ url });
+    }
+
+    return writeNewPlaintextTempData(new TextEncoder().encode(html)).then(
+      path => ({ path, url })
+    );
+  }
+
   const svg = new Blob([html], { type: 'image/svg+xml;charset=utf-8' });
   const svgUrl = URL.createObjectURL(svg);
 

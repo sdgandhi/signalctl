@@ -14,7 +14,6 @@ import lodash from 'lodash';
 import { BackupLevel } from '@signalapp/libsignal-client/zkgroup.js';
 import { BackupKey } from '@signalapp/libsignal-client/dist/AccountKeys.js';
 import lodashFp from 'lodash/fp.js';
-import { ipcRenderer } from 'electron';
 
 import { DataReader, DataWriter } from '../../sql/Client.preload.ts';
 import { createLogger } from '../../logging/log.std.ts';
@@ -127,6 +126,30 @@ const { throttle } = lodashFp;
 const { isEqual, noop } = lodash;
 
 const log = createLogger('backupsService');
+type IpcRendererLike = Readonly<{
+  invoke: <T>(channel: string, ...args: ReadonlyArray<unknown>) => Promise<T>;
+}>;
+let cachedIpcRenderer: IpcRendererLike | undefined;
+
+async function showOpenFolderDialog(): Promise<{
+  canceled: boolean;
+  dirPath?: string;
+}> {
+  if (cachedIpcRenderer) {
+    return cachedIpcRenderer.invoke('show-open-folder-dialog');
+  }
+
+  if (process.env.SIGNALCTL_HEADLESS === '1') {
+    throw new Error('Folder picker is unavailable in headless mode');
+  }
+
+  ({ ipcRenderer: cachedIpcRenderer } = await import('electron'));
+  if (!cachedIpcRenderer) {
+    throw new Error('Electron ipcRenderer is unavailable');
+  }
+
+  return cachedIpcRenderer.invoke('show-open-folder-dialog');
+}
 
 const IV_LENGTH = 16;
 
@@ -241,6 +264,10 @@ export class BackupsService {
           window.reduxActions.installer.handleMissingBackup();
         }
       } catch (error) {
+        if (process.env.SIGNALCTL_HEADLESS === '1') {
+          throw error;
+        }
+
         this.#downloadRetryPromise = explodePromise<RetryBackupImportValue>();
 
         let installerError: InstallScreenBackupError;
@@ -730,9 +757,7 @@ export class BackupsService {
   }
 
   public async _internalStageLocalBackupForImport(): Promise<ValidateLocalBackupStructureResultType> {
-    const { canceled, dirPath: snapshotDir } = await ipcRenderer.invoke(
-      'show-open-folder-dialog'
-    );
+    const { canceled, dirPath: snapshotDir } = await showOpenFolderDialog();
     if (canceled || !snapshotDir) {
       return {
         success: false,
@@ -1102,7 +1127,9 @@ export class BackupsService {
         'backups.doDownloadAndImport: error downloading backup file',
         Errors.toLogFormat(error)
       );
-      throw new BackupDownloadFailedError();
+      throw new BackupDownloadFailedError(
+        error instanceof Error ? error : new Error(String(error))
+      );
     }
 
     if (controller.signal.aborted) {
@@ -1444,9 +1471,8 @@ export class BackupsService {
   }
 
   async pickLocalBackupFolder(): Promise<string | undefined> {
-    const { canceled, dirPath: backupsParentDir } = await ipcRenderer.invoke(
-      'show-open-folder-dialog'
-    );
+    const { canceled, dirPath: backupsParentDir } =
+      await showOpenFolderDialog();
     if (canceled || !backupsParentDir) {
       return;
     }

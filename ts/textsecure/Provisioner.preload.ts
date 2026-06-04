@@ -222,10 +222,15 @@ export class Provisioner {
     }
     log.info(`stopping, reason=${reason}`);
 
+    const sockets = this.#sockets;
     this.#sockets = [];
     this.#abortController?.abort();
     this.#abortController = undefined;
     this.#isRunning = false;
+
+    for (const socket of sockets) {
+      drop(socket.disconnect());
+    }
   }
 
   async #loop(signal: AbortSignal): Promise<void> {

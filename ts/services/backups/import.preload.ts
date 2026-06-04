@@ -497,7 +497,8 @@ export class BackupImportStream extends Writable {
 
       if (
         this.#options.type !== 'cross-client-integration-test' &&
-        !isTestEnvironment(getEnvironment())
+        !isTestEnvironment(getEnvironment()) &&
+        process.env.SIGNALCTL_HEADLESS !== '1'
       ) {
         await startBackupMediaDownload();
       }

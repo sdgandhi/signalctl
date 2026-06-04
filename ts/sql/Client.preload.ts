@@ -1,7 +1,7 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ipcRenderer as ipc } from 'electron';
+import type { IpcRenderer } from 'electron';
 import lodash from 'lodash';
 
 import type { ReadonlyDeep } from 'type-fest';
@@ -24,6 +24,7 @@ import {
   AccessType,
   ipcInvoke,
   doShutdown,
+  isShutdownRequested,
   removeDB,
 } from './channels.preload.ts';
 import { getMessageIdForLogging } from '../util/idForLogging.preload.ts';
@@ -77,6 +78,7 @@ import {
 const { groupBy, isTypedArray, last, map, omit } = lodash;
 
 const log = createLogger('Client');
+let cachedIpcRenderer: IpcRenderer | undefined;
 
 const ERASE_SQL_KEY = 'erase-sql-key';
 const ERASE_ATTACHMENTS_KEY = 'erase-attachments';
@@ -318,6 +320,7 @@ async function shutdown(): Promise<void> {
   log.info('shutdown');
 
   // Stop accepting new SQL jobs, flush outstanding queue
+  await flushUpdateConversationBatcher();
   await doShutdown();
 }
 
@@ -522,6 +525,14 @@ const updateConversationBatcher = createBatcher<ConversationType>({
   wait: 500,
   maxSize: 20,
   processBatch: async (items: Array<ConversationType>) => {
+    if (isShutdownRequested()) {
+      log.warn(
+        'sql.Client.updateConversationBatcher: dropping conversation update ' +
+          'because SQL shutdown is already in progress'
+      );
+      return;
+    }
+
     // We only care about the most recent update for each conversation
     const byId = groupBy(items, item => item.id);
     const ids = Object.keys(byId);
@@ -536,6 +547,14 @@ const updateConversationBatcher = createBatcher<ConversationType>({
 });
 
 async function updateConversation(data: ConversationType): Promise<void> {
+  if (isShutdownRequested()) {
+    log.warn(
+      'sql.Client.updateConversation: dropping conversation update because ' +
+        'SQL shutdown is already in progress'
+    );
+    return;
+  }
+
   updateConversationBatcher.add(data);
 }
 async function flushUpdateConversationBatcher(): Promise<void> {
@@ -891,8 +910,14 @@ async function invokeWithTimeout(
   name: string,
   ...args: Array<unknown>
 ): Promise<void> {
+  cachedIpcRenderer ??= (await import('electron')).ipcRenderer;
+  if (!cachedIpcRenderer) {
+    throw new Error('Electron ipcRenderer is unavailable');
+  }
+  const ipcRenderer = cachedIpcRenderer;
+
   return runTaskWithTimeout(
-    () => ipc.invoke(name, ...args),
+    () => ipcRenderer.invoke(name, ...args),
     `callChannel call to ${name}`
   );
 }

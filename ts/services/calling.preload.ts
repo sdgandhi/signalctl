@@ -1,7 +1,6 @@
 // Copyright 2020 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { ipcRenderer } from 'electron';
 import type {
   AudioDevice,
   CallId,
@@ -193,6 +192,61 @@ const { i18n } = window.SignalContext;
 const { uniqBy, noop, compact } = lodash;
 
 const log = createLogger('calling');
+type IpcRendererLike = Readonly<{
+  invoke: <T>(channel: string, ...args: ReadonlyArray<unknown>) => Promise<T>;
+  on: (
+    channel: string,
+    listener: (...args: ReadonlyArray<unknown>) => void
+  ) => void;
+  send: (channel: string, ...args: ReadonlyArray<unknown>) => void;
+}>;
+let cachedIpcRenderer: IpcRendererLike | undefined;
+
+async function getIpcRenderer(): Promise<IpcRendererLike> {
+  if (cachedIpcRenderer) {
+    return cachedIpcRenderer;
+  }
+
+  if (process.env.SIGNALCTL_HEADLESS === '1') {
+    throw new Error('Electron ipcRenderer is unavailable in headless mode');
+  }
+
+  ({ ipcRenderer: cachedIpcRenderer } = await import('electron'));
+  if (!cachedIpcRenderer) {
+    throw new Error('Electron ipcRenderer is unavailable');
+  }
+
+  return cachedIpcRenderer;
+}
+
+function onIpcRenderer(
+  channel: string,
+  listener: (...args: ReadonlyArray<unknown>) => void
+): void {
+  if (process.env.SIGNALCTL_HEADLESS === '1') {
+    return;
+  }
+
+  drop(getIpcRenderer().then(ipcRenderer => ipcRenderer.on(channel, listener)));
+}
+
+function sendIpcRenderer(channel: string, ...args: ReadonlyArray<unknown>) {
+  if (process.env.SIGNALCTL_HEADLESS === '1') {
+    return;
+  }
+
+  drop(
+    getIpcRenderer().then(ipcRenderer => ipcRenderer.send(channel, ...args))
+  );
+}
+
+async function invokeIpcRenderer<T>(
+  channel: string,
+  ...args: ReadonlyArray<unknown>
+): Promise<T> {
+  const ipcRenderer = await getIpcRenderer();
+  return ipcRenderer.invoke(channel, ...args);
+}
 const ringrtcLog = createLogger('@signalapp/ringrtc');
 
 const { wasGroupCallRingPreviouslyCanceled } = DataReader;
@@ -642,7 +696,7 @@ class CallingClass {
       this.#attemptToGiveOurServiceIdToRingRtc();
     });
 
-    ipcRenderer.on('stop-screen-share', () => {
+    onIpcRenderer('stop-screen-share', () => {
       reduxInterface.cancelPresenting();
     });
 
@@ -2480,7 +2534,7 @@ class CallingClass {
       log.error(`${logId}: Trying to hang up a non-existent call`);
     }
 
-    ipcRenderer.send(
+    sendIpcRenderer(
       'screen-share:status-change',
       ScreenShareStatus.Disconnected
     );
@@ -2696,7 +2750,7 @@ class CallingClass {
     }
 
     if (isPresenting) {
-      ipcRenderer.send('show-screen-share', source?.name);
+      sendIpcRenderer('show-screen-share', source?.name);
 
       let url: string;
       let absolutePath: string | undefined;
@@ -2737,7 +2791,7 @@ class CallingClass {
         title: i18n('icu:calling__presenting--notification-title'),
       });
     } else {
-      ipcRenderer.send(
+      sendIpcRenderer(
         'screen-share:status-change',
         ScreenShareStatus.Disconnected
       );
@@ -2812,7 +2866,7 @@ class CallingClass {
         ),
       });
     }
-    ipcRenderer.send('screen-share:status-change', newStatus);
+    sendIpcRenderer('screen-share:status-change', newStatus);
   }
 
   async #startDeviceReselectionTimer(): Promise<void> {
@@ -4392,7 +4446,7 @@ class CallingClass {
                 log.info('Already registered calling asset', opt);
                 return;
               }
-              const content = await ipcRenderer.invoke(
+              const content = await invokeIpcRenderer<ArrayBuffer>(
                 'OptionalResourceService:getData',
                 opt
               );
